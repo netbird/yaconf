@@ -54,6 +54,7 @@ ZEND_BEGIN_ARG_INFO_EX(php_yaconf_has_arginfo, 0, 0, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(php_yaconf_update_arginfo, 0, 0, 1)
+	ZEND_ARG_INFO(0, name)
 ZEND_END_ARG_INFO()
 
 /* }}} */
@@ -414,7 +415,7 @@ PHP_YACONF_API zval *php_yaconf_get(zend_string *name) /* {{{ */ {
 }
 /* }}} */
 
-PHP_YACONF_API void php_yaconf_update() /* {{{ */ {
+PHP_YACONF_API int php_yaconf_update(zend_string *name) /* {{{ */ {
 	if (YACONF_G(check_delay) && (time(NULL) - YACONF_G(last_check) < YACONF_G(check_delay))) {
 		YACONF_DEBUG("config check delay doesn't execceed, ignore");
 		return SUCCESS;
@@ -503,7 +504,8 @@ PHP_YACONF_API void php_yaconf_update() /* {{{ */ {
 			}
 		} 
 		YACONF_DEBUG("stat config directory failed");
-	return NULL;
+	}
+	return 1;
 }
 /* }}} */
 
@@ -553,12 +555,13 @@ PHP_METHOD(yaconf, has) {
 */
 PHP_METHOD(yaconf, update) {
 	
-	}
+	zend_string *name;
 
-	return SUCCESS;
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &name) == FAILURE) {
+		return;
+	} 
 
-	
-	RETURN_NULL();
+	RETURN_BOOL(1);
 }
 
 /* {{{  yaconf_methods */
