@@ -52,6 +52,10 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(php_yaconf_has_arginfo, 0, 0, 1)
 	ZEND_ARG_INFO(0, name)
 ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(php_yaconf_update_arginfo, 0, 0, 1)
+ZEND_END_ARG_INFO()
+
 /* }}} */
 
 /* {{{ yaconf_module_entry
@@ -410,6 +414,99 @@ PHP_YACONF_API zval *php_yaconf_get(zend_string *name) /* {{{ */ {
 }
 /* }}} */
 
+PHP_YACONF_API void php_yaconf_update() /* {{{ */ {
+	if (YACONF_G(check_delay) && (time(NULL) - YACONF_G(last_check) < YACONF_G(check_delay))) {
+		YACONF_DEBUG("config check delay doesn't execceed, ignore");
+		return SUCCESS;
+	} else {
+		char *dirname;
+		struct zend_stat dir_sb = {0};
+
+		YACONF_G(last_check) = time(NULL);
+
+		if ((dirname = YACONF_G(directory)) && !VCWD_STAT(dirname, &dir_sb) && S_ISDIR(dir_sb.st_mode)) {
+			if (dir_sb.st_mtime == YACONF_G(directory_mtime)) {
+				YACONF_DEBUG("config directory is not modefied");
+				return SUCCESS;
+			} else {
+				zval result;
+				int i, ndir;
+				struct dirent **namelist;
+				char *p, ini_file[MAXPATHLEN];
+
+				YACONF_G(directory_mtime) = dir_sb.st_mtime;
+
+				if ((ndir = php_scandir(dirname, &namelist, 0, php_alphasort)) > 0) {
+					zend_string *file_key;
+					struct zend_stat sb;
+					zend_file_handle fh = {0};
+					yaconf_filenode *node = NULL;
+
+					for (i = 0; i < ndir; i++) {
+						zval *orig_ht = NULL;
+						if (!(p = strrchr(namelist[i]->d_name, '.')) || strcmp(p, ".ini")) {
+							free(namelist[i]);
+							continue;
+						}
+
+						snprintf(ini_file, MAXPATHLEN, "%s%c%s", dirname, DEFAULT_SLASH, namelist[i]->d_name);
+						if (VCWD_STAT(ini_file, &sb) || !S_ISREG(sb.st_mode)) {
+							free(namelist[i]);
+							continue;
+						}
+
+						if ((node = (yaconf_filenode*)zend_hash_str_find_ptr(parsed_ini_files, namelist[i]->d_name, strlen(namelist[i]->d_name))) == NULL) {
+							YACONF_DEBUG("new configure file found");
+						} else if (node->mtime == sb.st_mtime) {
+							free(namelist[i]);
+							continue;
+						}
+
+						if ((fh.handle.fp = VCWD_FOPEN(ini_file, "r"))) {
+							fh.filename = ini_file;
+							fh.type = ZEND_HANDLE_FP;
+							ZVAL_UNDEF(&active_ini_file_section);
+							YACONF_G(parse_err) = 0;
+							php_yaconf_hash_init(&result, 128);
+							if (zend_parse_ini_file(&fh, 1, 0 /* ZEND_INI_SCANNER_NORMAL */,
+									php_yaconf_ini_parser_cb, (void *)&result) == FAILURE || YACONF_G(parse_err)) {
+								YACONF_G(parse_err) = 0;
+								php_yaconf_hash_destroy(Z_ARRVAL(result));
+								free(namelist[i]);
+								continue;
+							}
+						}
+
+
+						file_key = php_yaconf_str_persistent(namelist[i]->d_name, p - namelist[i]->d_name);
+						if ((orig_ht = zend_symtable_find(ini_containers, file_key)) != NULL) {
+							php_yaconf_hash_destroy(Z_ARRVAL_P(orig_ht));
+							ZVAL_COPY_VALUE(orig_ht, &result);
+							free(file_key);
+						} else {
+							php_yaconf_symtable_update(ini_containers, file_key, &result);
+						}
+
+						if (node) {
+							node->mtime = sb.st_mtime;
+						} else {
+							yaconf_filenode n = {0};
+							n.filename = zend_string_init(namelist[i]->d_name, strlen(namelist[i]->d_name), 1);
+							n.mtime = sb.st_mtime;
+							zend_hash_update_mem(parsed_ini_files, n.filename, &n, sizeof(yaconf_filenode));
+						}
+						free(namelist[i]);
+					}
+					free(namelist);
+				}
+				return SUCCESS;
+			}
+		} 
+		YACONF_DEBUG("stat config directory failed");
+	return NULL;
+}
+/* }}} */
+
 PHP_YACONF_API int php_yaconf_has(zend_string *name) /* {{{ */ {
 	if (php_yaconf_get(name)) {
 		return 1;
@@ -452,10 +549,23 @@ PHP_METHOD(yaconf, has) {
 }
 /* }}} */
 
+/** {{{ proto public Yaconf::update()
+*/
+PHP_METHOD(yaconf, update) {
+	
+	}
+
+	return SUCCESS;
+
+	
+	RETURN_NULL();
+}
+
 /* {{{  yaconf_methods */
 zend_function_entry yaconf_methods[] = {
 	PHP_ME(yaconf, get, php_yaconf_get_arginfo, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(yaconf, has, php_yaconf_has_arginfo, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(yaconf, update, php_yaconf_update_arginfo, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	{NULL, NULL, NULL}
 };
 /* }}} */
