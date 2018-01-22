@@ -29,6 +29,8 @@ ZEND_DECLARE_MODULE_GLOBALS(yaconf);
 static HashTable *ini_containers;
 static HashTable *parsed_ini_files;
 static zval active_ini_file_section;
+// test hashtable
+static HashTable *test_ini_containers;
 
 zend_class_entry *yaconf_ce;
 
@@ -134,8 +136,10 @@ static zval* php_yaconf_symtable_update(HashTable *ht, zend_string *key, zval *z
 	zend_ulong idx;
 	if (ZEND_HANDLE_NUMERIC(key, idx)) {
 		free(key);
+		// 更新数组 
 		return zend_hash_index_update(ht, idx, zv);
 	} else {
+		// 更新map
 		return zend_hash_update(ht, key, zv);
 	}
 }
@@ -411,30 +415,67 @@ PHP_YACONF_API zval *php_yaconf_get(zend_string *name) /* {{{ */ {
 }
 /* }}} */
 
+PHP_YACONF_API zval *php_yaconf_get_test(zend_string *name) /* {{{ */ {
+	if (test_ini_containers) {
+		zval *pzval;
+		HashTable *target = test_ini_containers;
+
+		if (zend_memrchr(ZSTR_VAL(name), '.', ZSTR_LEN(name))) {
+			char *entry, *ptr, *seg;
+			entry = estrndup(ZSTR_VAL(name), ZSTR_LEN(name));
+			if ((seg = php_strtok_r(entry, ".", &ptr))) {
+				do {
+					if (target == NULL || (pzval = zend_symtable_str_find(target, seg, strlen(seg))) == NULL) {
+						efree(entry);
+						return NULL;
+					}
+					if (Z_TYPE_P(pzval) == IS_ARRAY) {
+						target = Z_ARRVAL_P(pzval);
+					} else {
+						target = NULL;
+					}
+				} while ((seg = php_strtok_r(NULL, ".", &ptr)));
+			}
+			efree(entry);
+		} else {
+			pzval = zend_symtable_find(target, name);
+		}
+
+		return pzval;
+	}
+	return NULL;
+}
+/* }}} */
+
 PHP_YACONF_API int php_yaconf_update() /* {{{ */ {
 	if (YACONF_G(check_delay) && (time(NULL) - YACONF_G(last_check) < YACONF_G(check_delay))) {
+		// 检测时间 
 		YACONF_DEBUG("config check delay doesn't execceed, ignore");
 		return SUCCESS;
 	} else {
-		printf("hello world");
+		
 		char *dirname;
 		struct zend_stat dir_sb = {0};
 
 		YACONF_G(last_check) = time(NULL);
+		// 更新最后检测时间 为现在
 
 		if ((dirname = YACONF_G(directory)) && !VCWD_STAT(dirname, &dir_sb) && S_ISDIR(dir_sb.st_mode)) {
 			if (dir_sb.st_mtime == YACONF_G(directory_mtime)) {
+				// 检测目标配置文件的路径是否是常规路径和检测
 				YACONF_DEBUG("config directory is not modefied");
 				return SUCCESS;
 			} else {
 				zval result;
 				int i, ndir;
 				struct dirent **namelist;
-				char *p, ini_file[MAXPATHLEN];
+				char *p, ini_file[MAXPATHLEN]; // MAXPATHLEN = 256
 
 				YACONF_G(directory_mtime) = dir_sb.st_mtime;
 
 				if ((ndir = php_scandir(dirname, &namelist, 0, php_alphasort)) > 0) {
+					// 检索文件夹里的有效文件
+					// ndir 是返回值
 					zend_string *file_key;
 					struct zend_stat sb;
 					zend_file_handle fh = {0};
@@ -443,16 +484,21 @@ PHP_YACONF_API int php_yaconf_update() /* {{{ */ {
 					for (i = 0; i < ndir; i++) {
 						zval *orig_ht = NULL;
 						if (!(p = strrchr(namelist[i]->d_name, '.')) || strcmp(p, ".ini")) {
+							// 返回 . 首次出现的位置，并且返回从这个开始的字符串
+							// 所以 a.b.ini 不符合条件
 							free(namelist[i]);
 							continue;
 						}
 
 						snprintf(ini_file, MAXPATHLEN, "%s%c%s", dirname, DEFAULT_SLASH, namelist[i]->d_name);
+
+						// 单个文件目录+文件  最多255个字符
 						if (VCWD_STAT(ini_file, &sb) || !S_ISREG(sb.st_mode)) {
 							free(namelist[i]);
 							continue;
 						}
 
+						// 从ini 文件记录表中 找到文件的mtime和文件的mtime进行比对 如果相等则pass
 						if ((node = (yaconf_filenode*)zend_hash_str_find_ptr(parsed_ini_files, namelist[i]->d_name, strlen(namelist[i]->d_name))) == NULL) {
 							YACONF_DEBUG("new configure file found");
 						} else if (node->mtime == sb.st_mtime) {
@@ -466,6 +512,7 @@ PHP_YACONF_API int php_yaconf_update() /* {{{ */ {
 							ZVAL_UNDEF(&active_ini_file_section);
 							YACONF_G(parse_err) = 0;
 							php_yaconf_hash_init(&result, 128);
+
 							if (zend_parse_ini_file(&fh, 1, 0 /* ZEND_INI_SCANNER_NORMAL */,
 									php_yaconf_ini_parser_cb, (void *)&result) == FAILURE || YACONF_G(parse_err)) {
 								YACONF_G(parse_err) = 0;
@@ -506,6 +553,82 @@ PHP_YACONF_API int php_yaconf_update() /* {{{ */ {
 }
 /* }}} */
 
+PHP_YACONF_API int php_yaconf_create_testini() /* {{{ */ {
+	
+	//char *dirname;
+	struct zend_stat dir_sb = {0};
+	
+	zend_string *strg; 
+	strg = strpprintf(0, "testconf.directory");
+	
+	zval *dirname;
+	dirname = php_yaconf_get(strg);
+	char *dirstr;
+	dirstr = estrndup(Z_STRVAL_P(dirname), Z_STRLEN_P(dirname));
+	
+	//
+	if (dirstr && !VCWD_STAT(dirstr, &dir_sb) && S_ISDIR(dir_sb.st_mode)) {
+		zval result;
+		int i, ndir;
+		struct dirent **namelist;
+		char *p, ini_file[MAXPATHLEN]; // MAXPATHLEN = 256
+		
+		if ((ndir = php_scandir(dirstr, &namelist, 0, php_alphasort)) > 0) {
+			
+			// 检索文件夹里的有效文件
+			// ndir 是返回值
+			zend_string *file_key;
+			struct zend_stat sb;
+			zend_file_handle fh = {0};
+			yaconf_filenode *node = NULL;
+
+			PALLOC_HASHTABLE(test_ini_containers);
+			zend_hash_init(test_ini_containers, ndir, NULL, NULL, 1);
+			
+			for (i = 0; i < ndir; i++) {
+				zval *orig_ht = NULL;
+				if (!(p = strrchr(namelist[i]->d_name, '.')) || strcmp(p, ".ini")) {
+					// 返回 . 首次出现的位置，并且返回从这个开始的字符串
+					// 所以 a.b.ini 不符合条件
+					free(namelist[i]);
+					continue;
+				}
+				
+				snprintf(ini_file, MAXPATHLEN, "%s%c%s", dirstr, DEFAULT_SLASH, namelist[i]->d_name);
+
+				// 单个文件目录+文件  最多255个字符
+				if (VCWD_STAT(ini_file, &sb) || !S_ISREG(sb.st_mode)) {
+					free(namelist[i]);
+					continue;
+				}
+
+				if ((fh.handle.fp = VCWD_FOPEN(ini_file, "r"))) {
+					fh.filename = ini_file;
+					fh.type = ZEND_HANDLE_FP;
+					ZVAL_UNDEF(&active_ini_file_section);
+					YACONF_G(parse_err) = 0;
+					php_yaconf_hash_init(&result, 128);
+
+					if (zend_parse_ini_file(&fh, 1, 0 /* ZEND_INI_SCANNER_NORMAL */,
+							php_yaconf_ini_parser_cb, (void *)&result) == FAILURE || YACONF_G(parse_err)) {
+						YACONF_G(parse_err) = 0;
+						php_yaconf_hash_destroy(Z_ARRVAL(result));
+						free(namelist[i]);
+						continue;
+					}
+				}
+				php_yaconf_symtable_update(test_ini_containers,
+								php_yaconf_str_persistent(namelist[i]->d_name, p - namelist[i]->d_name), &result);
+				free(namelist[i]);
+			}
+			free(namelist);
+		}
+		return SUCCESS;
+	}
+	return SUCCESS;	
+}
+/* }}} */
+
 PHP_YACONF_API int php_yaconf_has(zend_string *name) /* {{{ */ {
 	if (php_yaconf_get(name)) {
 		return 1;
@@ -523,8 +646,15 @@ PHP_METHOD(yaconf, get) {
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|z", &name, &defv) == FAILURE) {
 		return;
 	} 
+	// test 内容
+	if (YACONF_G(istest)) {
+		val = php_yaconf_get_test(name);
+	}
 
-	val = php_yaconf_get(name);
+	if (!val) {
+		val = php_yaconf_get(name);
+	}
+
 	if (val) {
 		RETURN_ZVAL(val, 0, 0);
 	} else if (defv) {
@@ -538,12 +668,14 @@ PHP_METHOD(yaconf, get) {
 /** {{{ proto public Yaconf::has(string $name)
 */
 PHP_METHOD(yaconf, has) {
+
+	
 	zend_string *name;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &name) == FAILURE) {
 		return;
 	} 
-
+	//RETURN_BOOL(php_yaconf_create_testini());
 	RETURN_BOOL(php_yaconf_has(name));
 }
 /* }}} */
@@ -568,6 +700,8 @@ zend_function_entry yaconf_methods[] = {
  */
 PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("yaconf.directory", "", PHP_INI_SYSTEM, OnUpdateString, directory, zend_yaconf_globals, yaconf_globals)
+	STD_PHP_INI_ENTRY("yaconf.istest", "0", PHP_INI_SYSTEM, OnUpdateBool, istest, zend_yaconf_globals, yaconf_globals)
+
 #ifndef ZTS
 	STD_PHP_INI_ENTRY("yaconf.check_delay", "300", PHP_INI_SYSTEM, OnUpdateLong, check_delay, zend_yaconf_globals, yaconf_globals)
 #endif
@@ -640,8 +774,10 @@ PHP_MINIT_FUNCTION(yaconf)
 				            ZVAL_UNDEF(&active_ini_file_section);
 							YACONF_G(parse_err) = 0;
 							php_yaconf_hash_init(&result, 128);
+							
 							if (zend_parse_ini_file(&fh, 1, 0 /* ZEND_INI_SCANNER_NORMAL */,
 									php_yaconf_ini_parser_cb, (void *)&result) == FAILURE || YACONF_G(parse_err)) {
+							    // 调用系统函数 解析ini文件  如果解析失败 则continue
 								YACONF_G(parse_err) = 0;
 								php_yaconf_hash_destroy(Z_ARRVAL(result));
 								free(namelist[i]);
@@ -649,11 +785,13 @@ PHP_MINIT_FUNCTION(yaconf)
 							}
 						}
 						
+						// 更新内容hashtable
 						php_yaconf_symtable_update(ini_containers,
 								php_yaconf_str_persistent(namelist[i]->d_name, p - namelist[i]->d_name), &result);
 
 						node.filename = zend_string_init(namelist[i]->d_name, strlen(namelist[i]->d_name), 1);
 						node.mtime = sb.st_mtime;
+						
 						zend_hash_update_mem(parsed_ini_files, node.filename, &node, sizeof(yaconf_filenode));
 					}
 				} else {
@@ -662,6 +800,7 @@ PHP_MINIT_FUNCTION(yaconf)
 				free(namelist[i]);
 			}
 #ifndef ZTS
+			// 更新最后检测时间
 			YACONF_G(last_check) = time(NULL);
 #endif
 			free(namelist);
@@ -679,6 +818,9 @@ PHP_MINIT_FUNCTION(yaconf)
 */
 PHP_RINIT_FUNCTION(yaconf)
 {
+	if (YACONF_G(istest)) {
+		php_yaconf_create_testini();
+	}
 	if (YACONF_G(check_delay) && (time(NULL) - YACONF_G(last_check) < YACONF_G(check_delay))) {
 		YACONF_DEBUG("config check delay doesn't execceed, ignore");
 		return SUCCESS;
@@ -774,6 +916,17 @@ PHP_RINIT_FUNCTION(yaconf)
 /* }}} */
 #endif
 
+// #ifndef ZTS
+// /* {{{ PHP_RSHUTDOWN_FUNCTION(yaconf)
+// */
+// PHP_RSHUTDOWN_FUNCTION(yaconf)
+// {
+// 	if (YACONF_G(istest) && test_ini_containers) {
+// 		php_yaconf_hash_destroy(test_ini_containers);
+// 	} 
+// }
+// /* }}} */
+// #endif
 /* {{{ PHP_MSHUTDOWN_FUNCTION
  */
 PHP_MSHUTDOWN_FUNCTION(yaconf)
@@ -787,6 +940,10 @@ PHP_MSHUTDOWN_FUNCTION(yaconf)
 	if (ini_containers) {
 		php_yaconf_hash_destroy(ini_containers);
 	}
+
+	if (YACONF_G(istest) && test_ini_containers) {
+		php_yaconf_hash_destroy(test_ini_containers);
+	} 
 
 	return SUCCESS;
 }

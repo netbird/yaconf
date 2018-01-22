@@ -48,6 +48,7 @@ extern zend_module_entry yaconf_module_entry;
 ZEND_BEGIN_MODULE_GLOBALS(yaconf)
 	char *directory;
 	int   parse_err;
+  zend_bool istest;
 #ifndef ZTS
 	long   check_delay;
 	time_t last_check;
@@ -67,8 +68,12 @@ extern ZEND_DECLARE_MODULE_GLOBALS(yaconf);
 
 BEGIN_EXTERN_C() 
 PHP_YACONF_API zval *php_yaconf_get(zend_string *name);
+PHP_YACONF_API zval *php_yaconf_get_test(zend_string *name);
 PHP_YACONF_API int php_yaconf_has(zend_string *name);
+// cli模式下 只执行一次的RINIT_FUNCTION 的问题
 PHP_YACONF_API int php_yaconf_update();
+// test 模式下 生成ini文件
+PHP_YACONF_API int php_yaconf_create_testini();
 END_EXTERN_C()
 
 #endif	/* PHP_YACONF_H */
