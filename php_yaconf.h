@@ -49,6 +49,8 @@ ZEND_BEGIN_MODULE_GLOBALS(yaconf)
 	char *directory;
 	int   parse_err;
   zend_bool istest;
+  // add by fuyuan
+  char *directory_test;
 #ifndef ZTS
 	long   check_delay;
 	time_t last_check;
@@ -60,6 +62,7 @@ PHP_MINIT_FUNCTION(yaconf);
 PHP_MSHUTDOWN_FUNCTION(yaconf);
 #ifndef ZTS
 PHP_RINIT_FUNCTION(yaconf);
+PHP_RSHUTDOWN_FUNCTION(yaconf);
 #endif
 PHP_MINFO_FUNCTION(yaconf);
 PHP_GINIT_FUNCTION(yaconf);

@@ -18,6 +18,7 @@
 #include "config.h"
 #endif
 
+#include "main/SAPI.h"
 #include "php.h"
 #include "php_ini.h"
 #include "main/php_scandir.h"
@@ -70,7 +71,7 @@ zend_module_entry yaconf_module_entry = {
 #else
 	NULL,
 #endif
-	NULL,
+	PHP_RSHUTDOWN(yaconf),
 	PHP_MINFO(yaconf),
 	PHP_YACONF_VERSION,
 	PHP_MODULE_GLOBALS(yaconf),
@@ -556,18 +557,18 @@ PHP_YACONF_API int php_yaconf_update() /* {{{ */ {
 PHP_YACONF_API int php_yaconf_create_testini() /* {{{ */ {
 	
 	//char *dirname;
-	struct zend_stat dir_sb = {0};
+	 struct zend_stat dir_sb = {0};
 	
-	zend_string *strg; 
-	strg = strpprintf(0, "testconf.directory");
+	// zend_string *strg; 
+	// strg = strpprintf(0, "testconf.directory");
 	
-	zval *dirname;
-	dirname = php_yaconf_get(strg);
-	char *dirstr;
-	dirstr = estrndup(Z_STRVAL_P(dirname), Z_STRLEN_P(dirname));
-	
+	// zval *dirname;
+	// dirname = php_yaconf_get(strg);
+	// char *dirstr;
+	// dirstr = estrndup(Z_STRVAL_P(dirname), Z_STRLEN_P(dirname));
 	//
-	if (dirstr && !VCWD_STAT(dirstr, &dir_sb) && S_ISDIR(dir_sb.st_mode)) {
+	char *dirstr;
+	if (YACONF_G(istest) && (dirstr = YACONF_G(directory_test)) && !VCWD_STAT(dirstr, &dir_sb) && S_ISDIR(dir_sb.st_mode)) {
 		zval result;
 		int i, ndir;
 		struct dirent **namelist;
@@ -646,6 +647,41 @@ PHP_METHOD(yaconf, get) {
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|z", &name, &defv) == FAILURE) {
 		return;
 	} 
+
+////////////////////////////////////////
+	// zval method, params;
+	// zval *abc;
+    // if (SG(request_info).request_method) {
+	// 	ZVAL_STRING(&method, (char *)SG(request_info).request_method);
+	// 	//http 请求
+	// 	zval *servers;
+
+	// 	zend_string *strg; 
+	// 	strg = strpprintf(0, "HTTP_HOST");
+
+	// 	zval *host	= NULL;
+	// 	servers = &PG(http_globals)[TRACK_VARS_SERVER];
+	// 	if (servers && Z_TYPE_P(servers) == IS_ARRAY) {
+	// 		RETURN_ZVAL(servers, 0, 0);
+	// 		return;
+	// 		host = zend_hash_find(Z_ARRVAL_P(servers), strg);
+	// 		// port = zend_hash_find(Z_ARRVAL_P(servers), 'SERVER_PORT');
+	// 		if (host){
+	// 			RETURN_ZVAL(host, 0, 0);
+	// 			return;
+	// 		}
+	// 	}
+	// } else if (strncasecmp(sapi_module.name, "cli", 3)) {
+	// 	ZVAL_STRING(&method, "Unknow");
+	// } else {
+	// 	ZVAL_STRING(&method, "Cli");
+	// }
+	// abc = &method;
+
+	// RETURN_ZVAL(abc, 0, 0);
+	// return;
+	///////////////////////////////////////
+
 	// test 内容
 	if (YACONF_G(istest)) {
 		val = php_yaconf_get_test(name);
@@ -701,7 +737,7 @@ zend_function_entry yaconf_methods[] = {
 PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("yaconf.directory", "", PHP_INI_SYSTEM, OnUpdateString, directory, zend_yaconf_globals, yaconf_globals)
 	STD_PHP_INI_ENTRY("yaconf.istest", "0", PHP_INI_SYSTEM, OnUpdateBool, istest, zend_yaconf_globals, yaconf_globals)
-
+	STD_PHP_INI_ENTRY("yaconf.directory_test", "", PHP_INI_SYSTEM, OnUpdateString, directory_test, zend_yaconf_globals, yaconf_globals)
 #ifndef ZTS
 	STD_PHP_INI_ENTRY("yaconf.check_delay", "300", PHP_INI_SYSTEM, OnUpdateLong, check_delay, zend_yaconf_globals, yaconf_globals)
 #endif
@@ -713,6 +749,7 @@ PHP_INI_END()
 PHP_GINIT_FUNCTION(yaconf)
 {
 	yaconf_globals->directory = NULL;
+	yaconf_globals->directory_test = NULL;
 }
 /* }}} */
 
@@ -919,12 +956,14 @@ PHP_RINIT_FUNCTION(yaconf)
 // #ifndef ZTS
 // /* {{{ PHP_RSHUTDOWN_FUNCTION(yaconf)
 // */
-// PHP_RSHUTDOWN_FUNCTION(yaconf)
-// {
-// 	if (YACONF_G(istest) && test_ini_containers) {
-// 		php_yaconf_hash_destroy(test_ini_containers);
-// 	} 
-// }
+PHP_RSHUTDOWN_FUNCTION(yaconf)
+{
+	//
+	if (YACONF_G(istest) && test_ini_containers) {
+		php_yaconf_hash_destroy(test_ini_containers);
+	} 
+	return SUCCESS;
+}
 // /* }}} */
 // #endif
 /* {{{ PHP_MSHUTDOWN_FUNCTION
