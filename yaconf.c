@@ -631,9 +631,12 @@ PHP_YACONF_API int php_yaconf_create_testini() /* {{{ */ {
 /* }}} */
 
 PHP_YACONF_API int php_yaconf_has(zend_string *name) /* {{{ */ {
-	if (php_yaconf_get(name)) {
+
+	if (YACONF_G(istest) && php_yaconf_get_test(name)) {
 		return 1;
-	}
+	} elseif (php_yaconf_get(name) {
+		return 1;
+	} 
 	return 0;
 }
 /* }}} */
